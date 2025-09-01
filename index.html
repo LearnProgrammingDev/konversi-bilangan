@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Binary ⇄ Text Converter</title>
+  <style>
+    :root{--bg:#0f1724;--card:#0b1220;--accent:#06b6d4;--muted:#94a3b8;--glass:rgba(255,255,255,0.04)}
+    *{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,'Helvetica Neue',Arial;color:#e6eef6;background:linear-gradient(180deg,#071027 0%,#071a2a 100%);min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px}
+    .card{background:linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01));backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,0.04);padding:20px;border-radius:12px;max-width:880px;width:100%}
+    h1{margin:0 0 6px;font-size:20px}
+    p.lead{margin:0 0 18px;color:var(--muted);font-size:13px}
+    .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+    textarea{width:100%;min-height:160px;padding:12px;border-radius:8px;border:1px solid rgba(255,255,255,0.04);background:var(--card);color:#e6eef6;font-size:14px;resize:vertical}
+    .controls{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+    button{background:var(--accent);color:#042028;border:none;padding:8px 12px;border-radius:8px;cursor:pointer;font-weight:600}
+    button.ghost{background:transparent;border:1px solid rgba(255,255,255,0.06);color:var(--muted)}
+    .meta{font-size:13px;color:var(--muted);margin-top:10px}
+    .row{display:flex;gap:8px}
+    .small{font-size:12px;color:var(--muted)}
+    footer{margin-top:12px;text-align:right;color:var(--muted);font-size:12px}
+    @media(max-width:720px){.grid{grid-template-columns:1fr}}
+    .tag{display:inline-block;padding:6px 8px;border-radius:999px;background:var(--glass);font-size:12px;color:var(--muted);border:1px solid rgba(255,255,255,0.02)}
+    .error{color:#ffb4b4;background:rgba(255,80,80,0.06);padding:8px;border-radius:6px;margin-top:8px}
+    table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}
+    th,td{border:1px solid rgba(255,255,255,0.08);padding:6px;text-align:center}
+    th{background:rgba(255,255,255,0.06)}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Binary ⇄ Text Converter</h1>
+    <p class="lead">Konversi antara bilangan biner dan teks (ASCII / UTF-8-friendly). Paste biner (spasi atau tanpa spasi) atau teks biasa lalu tekan tombol konversi.</p>
+
+    <div class="grid">
+      <div>
+        <label class="small">Input</label>
+        <textarea id="input" placeholder="Masukkan biner seperti: 01001000 01100101 01101100 01101100 01101111 atau teks: Hello"></textarea>
+
+        <div class="controls">
+          <button id="binToText">Convert Binary → Text</button>
+          <button id="textToBin">Convert Text → Binary</button>
+          <button id="autoDetect" class="ghost">Auto-detect & Convert</button>
+          <button id="clear" class="ghost">Clear</button>
+          <button id="copyOut" class="ghost">Copy Output</button>
+        </div>
+
+        <div id="err" class="error" style="display:none"></div>
+        <div class="meta">Tip: Jika input biner tidak memiliki spasi, sistem akan mencoba menebak grouping 8-bit (atau 7/16 jika perlu). Mendukung emoji/UTF-8 saat mengonversi teks → biner.</div>
+      </div>
+
+      <div>
+        <label class="small">Output</label>
+        <textarea id="output" readonly placeholder="Output akan muncul di sini..."></textarea>
+
+        <div style="margin-top:8px" class="row">
+          <div class="tag">ASCII / UTF-8</div>
+          <div class="tag">Support: auto-group 7/8/16</div>
+        </div>
+
+        <footer>Created for: konversi bilangan biner → teks</footer>
+      </div>
+    </div>
+
+    <h2 style="margin-top:24px;font-size:18px">Tabel Huruf a–z dalam Biner (ASCII)</h2>
+    <table>
+      <thead>
+        <tr><th>Huruf</th><th>Desimal</th><th>Biner (8-bit)</th></tr>
+      </thead>
+      <tbody id="binTable"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const $ = id => document.getElementById(id);
+    const input = $('input');
+    const output = $('output');
+    const err = $('err');
+
+    function showErr(msg){ err.style.display = 'block'; err.textContent = msg }
+    function clearErr(){ err.style.display = 'none'; err.textContent = '' }
+
+    function isBinaryString(s){ return /^[01\s]+$/.test(s) }
+
+    function cleanBinary(s){ return s.replace(/[^01\s]/g,'').trim() }
+
+    function splitBinaryIntoBytes(s){
+      s = s.trim();
+      if(s.length === 0) return [];
+      if(/\s+/.test(s)){
+        return s.split(/\s+/).filter(Boolean);
+      }
+      for(const len of [8,7,16]){
+        if(s.length % len === 0){
+          const bytes = [];
+          for(let i=0;i<s.length;i+=len) bytes.push(s.slice(i,i+len));
+          return bytes;
+        }
+      }
+      const pad = (8 - (s.length % 8)) % 8;
+      s = '0'.repeat(pad) + s;
+      const bytes = [];
+      for(let i=0;i<s.length;i+=8) bytes.push(s.slice(i,i+8));
+      return bytes;
+    }
+
+    function binaryToText(bstr){
+      clearErr();
+      let cleaned = cleanBinary(bstr);
+      if(!isBinaryString(cleaned)){
+        showErr('Input mengandung karakter selain 0/1/spasi. Hanya 0 dan 1 yang diizinkan untuk konversi biner → teks.');
+        return '';
+      }
+      const bytes = splitBinaryIntoBytes(cleaned);
+      try{
+        const nums = bytes.map(bit => parseInt(bit,2));
+        const arr = new Uint8Array(nums);
+        const decoder = new TextDecoder('utf-8', {fatal:false});
+        return decoder.decode(arr);
+      }catch(e){
+        showErr('Gagal mendecode biner ke teks: ' + e.message);
+        return '';
+      }
+    }
+
+    function textToBinary(text){
+      clearErr();
+      try{
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(text);
+        return Array.from(bytes).map(b => b.toString(2).padStart(8,'0')).join(' ');
+      }catch(e){
+        showErr('Gagal mengonversi teks ke biner: ' + e.message);
+        return '';
+      }
+    }
+
+    $('binToText').addEventListener('click', ()=>{
+      output.value = binaryToText(input.value) || '';
+    });
+
+    $('textToBin').addEventListener('click', ()=>{
+      output.value = textToBinary(input.value) || '';
+    });
+
+    $('autoDetect').addEventListener('click', ()=>{
+      const val = input.value.trim();
+      if(val.length === 0){ output.value = ''; return }
+      if(/^[01\s]+$/.test(val)){
+        output.value = binaryToText(val) || '';
+      }else{
+        output.value = textToBinary(val) || '';
+      }
+    });
+
+    $('clear').addEventListener('click', ()=>{ input.value = ''; output.value = ''; clearErr(); });
+
+    $('copyOut').addEventListener('click', async ()=>{
+      try{
+        await navigator.clipboard.writeText(output.value);
+        alert('Output disalin ke clipboard.');
+      }catch(e){ showErr('Gagal menyalin: ' + e.message) }
+    });
+
+    input.addEventListener('keydown', (e)=>{
+      if(e.ctrlKey && e.key==='Enter'){
+        e.preventDefault(); $('autoDetect').click();
+      }
+    });
+
+    input.value = '01001000 01100101 01101100 01101100 01101111';
+    output.value = '';
+
+    // Generate table a-z
+    const tbody = document.getElementById('binTable');
+    for(let i=97;i<=122;i++){
+      const ch = String.fromCharCode(i);
+      const bin = i.toString(2).padStart(8,'0');
+      const row = `<tr><td>${ch}</td><td>${i}</td><td>${bin}</td></tr>`;
+      tbody.insertAdjacentHTML('beforeend', row);
+    }
+  </script>
+</body>
+</html>
